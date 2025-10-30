@@ -8,8 +8,8 @@ const montserrat = Montserrat({ subsets: ["latin"], display: "swap", variable: "
 const lora = Lora({ subsets: ["latin"], display: "swap", variable: "--font-lora" })
 
 export const metadata: Metadata = {
-  title: "Marine Species Tracker",
-  description: "Track and learn about marine species around the world",
+  title: "HAOJIA Energy",
+  description: "Haojia Energy Co., Ltd",
   generator: "v0.dev",
 }
 

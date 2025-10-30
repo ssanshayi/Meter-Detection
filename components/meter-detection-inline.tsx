@@ -1,224 +1,273 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import Image from "next/image"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  Camera,
-  ClipboardCopy,
-  Loader2,
-  RefreshCcw,
-  Upload,
-  X,
-} from "lucide-react"
+import React, { useEffect, useRef, useState } from "react";
+import { PREDICT_URL } from "@/lib/api";
+import type { Detection, PredictResponse } from "@/lib/types";
 
-type PredictResponse = {
-  detected_image_url?: string
-  detected_image_base64?: string
-  meter_reading?: string
-  error?: string
-}
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL // 你的 Railway API 地址
+type ResultState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | {
+      status: "success";
+      detections: Detection[];
+      imageUrl: string;
+      fromServerImage: boolean;
+    };
 
 export default function MeterDetectionInline() {
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [resultImage, setResultImage] = useState<string | null>(null)
-  const [meterReading, setMeterReading] = useState<string | null>(null)
-  const [dragOver, setDragOver] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [result, setResult] = useState<ResultState>({ status: "idle" });
 
-  // 上传文件
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (!f) return
-    resetResult()
-    setFile(f)
-    setPreview(URL.createObjectURL(f))
-  }
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const resetAll = () => {
-    setFile(null)
-    setPreview(null)
-    resetResult()
-    setError(null)
-    if (inputRef.current) inputRef.current.value = ""
-  }
+  // File preview
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
-  const resetResult = () => {
-    setResultImage(null)
-    setMeterReading(null)
-  }
+  // Draw bounding boxes
+  useEffect(() => {
+    if (result.status !== "success") return;
 
-  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    setDragOver(false)
-    const f = e.dataTransfer.files?.[0]
-    if (!f) return
-    resetResult()
-    setFile(f)
-    setPreview(URL.createObjectURL(f))
-  }
+    const imgEl = imgRef.current;
+    const canvas = canvasRef.current;
+    if (!imgEl || !canvas) return;
 
-  // 检测逻辑
-  const detect = async () => {
-    if (!file) return
-    setLoading(true)
-    setError(null)
-    resetResult()
+    const draw = () => {
+      const w = imgEl.naturalWidth;
+      const h = imgEl.naturalHeight;
+
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#22c55e";
+      ctx.fillStyle = "rgba(34,197,94,0.35)";
+      ctx.font = "24px ui-sans-serif, system-ui, -apple-system";
+
+      for (const det of result.detections) {
+        const [x1, y1, x2, y2] = det.xyxy;
+        const bw = x2 - x1;
+        const bh = y2 - y1;
+        ctx.strokeRect(x1, y1, bw, bh);
+
+        const label = `${det.class_name} ${(det.confidence * 100).toFixed(1)}%`;
+        const labelW = ctx.measureText(label).width + 12;
+        const labelH = 26;
+
+        ctx.fillRect(x1, Math.max(0, y1 - labelH), labelW, labelH);
+        ctx.fillStyle = "#0a0a0a";
+        ctx.fillText(label, x1 + 6, Math.max(18, y1 - 6));
+        ctx.fillStyle = "rgba(34,197,94,0.35)";
+      }
+    };
+
+    if (imgEl.complete) draw();
+    else imgEl.onload = draw;
+  }, [result]);
+
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] || null;
+    setFile(f);
+    setResult({ status: "idle" });
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const f = e.dataTransfer.files?.[0] || null;
+    setFile(f);
+    setResult({ status: "idle" });
+  };
+  const onDragOver = (e: React.DragEvent) => e.preventDefault();
+
+  const handlePredict = async () => {
+    if (!file) {
+      setResult({ status: "error", message: "Please select an image first." });
+      return;
+    }
+    setResult({ status: "loading" });
 
     try {
-      if (!API_URL) throw new Error("缺少 API 地址，请配置 NEXT_PUBLIC_API_URL。")
-      const form = new FormData()
-      form.append("file", file)
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(PREDICT_URL, {
+        method: "POST",
+        body: fd,
+        cache: "no-store",
+      });
 
-      const res = await fetch(`${API_URL}/predict`, { method: "POST", body: form })
-      if (!res.ok) throw new Error(`请求失败：${res.status}`)
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${msg || res.statusText}`);
+      }
 
-      const data: PredictResponse = await res.json()
-      if (data.error) throw new Error(data.error)
+      const data = (await res.json()) as PredictResponse;
 
-      const img =
-        data.detected_image_url ??
-        (data.detected_image_base64 ? `data:image/jpeg;base64,${data.detected_image_base64}` : null)
+      // ✅ Sort detections from left to right based on x coordinate
+      let detections = Array.isArray(data?.detections) ? data.detections : [];
+      detections = detections.sort((a, b) => a.xyxy[0] - b.xyxy[0]);
 
-      setResultImage(img)
-      setMeterReading(data.meter_reading ?? null)
+      const imgUrl = data.image_base64
+        ? `data:image/jpeg;base64,${data.image_base64}`
+        : (previewUrl as string);
+
+      setResult({
+        status: "success",
+        detections,
+        imageUrl: imgUrl,
+        fromServerImage: Boolean(data.image_base64),
+      });
     } catch (err: any) {
-      setError(err.message || "检测失败，请稍后重试。")
-    } finally {
-      setLoading(false)
+      console.error(err);
+      setResult({
+        status: "error",
+        message: err?.message || "Prediction failed. Please try again later.",
+      });
     }
-  }
+  };
 
-  const copyReading = async () => {
-    if (meterReading) await navigator.clipboard.writeText(meterReading)
-  }
+  const canPredict = !!file && result.status !== "loading";
 
-  const dropCls = useMemo(
-    () =>
-      `border-2 border-dashed rounded-xl p-6 md:p-8 text-center transition-colors ${
-        dragOver ? "border-cyan-500 bg-cyan-50" : "border-cyan-200"
-      }`,
-    [dragOver]
-  )
-
-  useEffect(() => {
-    return () => {
-      if (preview) URL.revokeObjectURL(preview)
-    }
-  }, [preview])
+  // Join detected class names into a string (e.g. “09337”)
+  const detectedString =
+    result.status === "success"
+      ? result.detections.map((d) => d.class_name).join("")
+      : "";
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm p-6 md:p-8">
-      <div className="text-center mb-8">
-        <h3 className="text-2xl md:text-3xl font-bold text-cyan-800">AI Meter Detection</h3>
-        <p className="text-gray-600 mt-2">
-          Upload a photo of the electric meter, and the YOLOv8 model will automatically recognize the meter number and return the recognized image and recognition result.
-        </p>
-      </div>
-
-      {/* 上传区域 */}
+    <div className="w-full space-y-4">
+      {/* Upload area */}
       <div
-        className={dropCls}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragOver(true)
-        }}
-        onDragLeave={(e) => {
-          e.preventDefault()
-          setDragOver(false)
-        }}
         onDrop={onDrop}
-        onClick={() => inputRef.current?.click()}
+        onDragOver={onDragOver}
+        className="rounded-2xl border border-dashed border-neutral-300 p-6 text-center cursor-pointer"
       >
-        {!preview ? (
-          <div className="flex flex-col items-center">
-            <Upload className="h-10 w-10 text-cyan-600 mb-3" />
-            <p className="text-gray-800 font-medium">Drag and drop the image here, or click to select a file</p>
-            <p className="text-gray-500 text-sm mt-1">Support JPG/PNG to ensure clear digital areas</p>
-            <Input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-4">
-            <div className="relative w-full max-w-xl aspect-[4/3]">
-              <Image src={preview} alt="Preview" fill className="object-contain rounded-lg" />
-            </div>
-            <div className="flex items-center gap-3">
-              <Button variant="outline" onClick={resetAll}>
-                <X className="mr-2 h-4 w-4" /> remove
-              </Button>
-              <Button
-                onClick={detect}
-                disabled={loading}
-                className="bg-cyan-700 hover:bg-cyan-800 text-white"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Identifying...
-                  </>
-                ) : (
-                  <>
-                    <Camera className="mr-2 h-4 w-4" /> Upload and identify
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
+        <input
+          id="meter-file"
+          type="file"
+          accept="image/*"
+          onChange={onFileChange}
+          className="hidden"
+        />
+        <label htmlFor="meter-file" className="block text-sm text-neutral-600">
+          Drag and drop an image here or{" "}
+          <span className="text-blue-600 underline">click to upload</span>
+        </label>
+        {file && (
+          <p className="mt-2 text-xs text-neutral-500">
+            Selected file: {file.name} ({Math.round(file.size / 1024)} KB)
+          </p>
         )}
       </div>
 
-      {/* 错误提示 */}
-      {error && (
-        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700 text-center">
-          {error}
-        </div>
+      {/* Control buttons */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handlePredict}
+          disabled={!canPredict}
+          className={`px-4 py-2 rounded-xl text-white ${
+            canPredict ? "bg-blue-600 hover:bg-blue-700" : "bg-blue-300"
+          }`}
+        >
+          {result.status === "loading" ? "Detecting..." : "Start Detection"}
+        </button>
+
+        {result.status === "error" && (
+          <span className="text-sm text-red-600">{result.message}</span>
+        )}
+        {result.status === "success" && result.detections.length === 0 && (
+          <span className="text-sm text-neutral-600">
+            No detections found.
+          </span>
+        )}
+      </div>
+
+      {/* Preview image before detection */}
+      {previewUrl && result.status !== "success" && (
+        <img
+          src={previewUrl}
+          alt="preview"
+          className="max-w-full h-auto rounded-xl border border-neutral-200"
+        />
       )}
 
-      {/* 结果展示 */}
-      {(resultImage || meterReading) && (
-        <div className="mt-8">
-          <div className="grid md:grid-cols-5 gap-6 items-start">
-            {/* 识别图像 */}
-            <div className="md:col-span-3">
-              <div className="relative w-full aspect-[4/3] border rounded-lg overflow-hidden bg-gray-50">
-                {resultImage ? (
-                  <Image src={resultImage} alt="Detection Result" fill className="object-contain" />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                    Unrecognized image
-                  </div>
-                )}
-              </div>
+      {/* Detection results */}
+      {result.status === "success" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Image + boxes */}
+          <div className="relative w-full">
+            <div className="relative w-full">
+              <img
+                ref={imgRef}
+                src={result.imageUrl}
+                alt="result"
+                className="w-full h-auto rounded-xl border border-neutral-200"
+              />
+              <canvas
+                ref={canvasRef}
+                className="absolute left-0 top-0 w-full h-full pointer-events-none"
+              />
             </div>
+            <p className="mt-2 text-xs text-neutral-500">
+              {result.fromServerImage
+                ? "Displaying image returned by server"
+                : "Overlay generated locally"}
+            </p>
 
-            {/* 电表读数 */}
-            <div className="md:col-span-2">
-              <div className="rounded-xl bg-gray-50 border p-6 text-center h-full">
-                <p className="text-sm text-gray-600 mb-2">Identified meter readings</p>
-                <p className="text-5xl font-extrabold tracking-widest text-cyan-700 mb-4">
-                  {meterReading ?? "—"}
-                </p>
-                <div className="flex justify-center gap-3">
-                  <Button variant="outline" disabled={!meterReading} onClick={copyReading}>
-                    <ClipboardCopy className="mr-2 h-4 w-4" /> Copy Reading
-                  </Button>
-                  <Button variant="outline" onClick={resetAll}>
-                    <RefreshCcw className="mr-2 h-4 w-4" /> reupload
-                  </Button>
-                </div>
-                <p className="text-xs text-gray-500 mt-4">
-                Suggestion: Use good lighting, avoid reflection or blurring, and try to fill the digital area as much as possible in the picture.
-                </p>
-              </div>
-            </div>
+            {/* ✅ Display detected string */}
+            {detectedString && (
+              <p className="mt-3 text-base font-mono text-blue-600">
+                Detected Result: {detectedString}
+              </p>
+            )}
+          </div>
+
+          {/* Detection table */}
+          <div className="rounded-xl border border-neutral-200 p-3 overflow-auto">
+            <h2 className="text-sm font-medium mb-2">Detections</h2>
+            {result.detections.length > 0 ? (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-neutral-500">
+                    <th className="py-1 pr-2">#</th>
+                    <th className="py-1 pr-2">Class</th>
+                    <th className="py-1 pr-2">Confidence</th>
+                    <th className="py-1">[x1, y1, x2, y2]</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.detections.map((d, i) => (
+                    <tr key={i} className="border-t border-neutral-100">
+                      <td className="py-1 pr-2">{i + 1}</td>
+                      <td className="py-1 pr-2">{d.class_name}</td>
+                      <td className="py-1 pr-2">
+                        {(d.confidence * 100).toFixed(1)}%
+                      </td>
+                      <td className="py-1">
+                        [{d.xyxy.map((v) => v.toFixed(1)).join(", ")}]
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="text-sm text-neutral-500">No detections found.</div>
+            )}
           </div>
         </div>
       )}
     </div>
-  )
+  );
 }
