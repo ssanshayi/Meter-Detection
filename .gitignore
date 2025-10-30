@@ -1,0 +1,32 @@
+# dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# next.js build outputs
+.next/
+out/
+
+# testing
+coverage/
+
+# env
+.env*
+!.env.example
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# big files (根据需要排除)
+*.pt
+*.weights
+*.zip
+*.tar
+*.mp4
+*.mov
