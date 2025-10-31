@@ -45,17 +45,18 @@ export default function Navbar() {
     }
   }
 
+  // ✅ 更新：让 /home 时高亮 Home
   const isActive = (path: string) => {
-    if (path === "/") return pathname === "/"
+    if (path === "/home") return pathname === "/home" || pathname?.startsWith("/home")
     return pathname?.startsWith(path)
   }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-white">
       <div className="container flex h-16 items-center justify-between px-4">
-        {/* 品牌：昊甲能源 + Haojia Energy（小字） */}
+        {/* 品牌：点击回到 Home（不是 /welcome） */}
         <div className="flex items-center gap-2">
-          <Link href="/" className="flex flex-col leading-tight">
+          <Link href="/home" className="flex flex-col leading-tight">
             <span className="text-xl font-bold text-cyan-700">昊甲能源</span>
             <span className="text-xs text-gray-500 -mt-1">Haojia Energy</span>
           </Link>
@@ -64,9 +65,9 @@ export default function Navbar() {
         {/* 桌面导航 */}
         <nav className="hidden md:flex items-center gap-6">
           <Link
-            href="/"
+            href="/home"                                   // ✅ from "/" → "/home"
             className={`text-sm font-medium transition-colors ${
-              isActive("/") ? "text-cyan-700" : "hover:text-cyan-700"
+              isActive("/home") ? "text-cyan-700" : "hover:text-cyan-700"
             } animated-underline`}
           >
             Home
@@ -102,7 +103,7 @@ export default function Navbar() {
           </Link>
 
           <Link
-            href="/#about"
+            href="/home#about"                             // ✅ from "/#about" → "/home#about"
             className="text-sm font-medium hover:text-cyan-700 transition-colors animated-underline"
           >
             About
@@ -181,7 +182,7 @@ export default function Navbar() {
           <SheetContent side="right" className="w-[300px] sm:w-[400px]">
             {/* 移动端品牌 */}
             <div className="mt-2">
-              <Link href="/" onClick={() => setIsMenuOpen(false)} className="flex flex-col leading-tight">
+              <Link href="/home" onClick={() => setIsMenuOpen(false)} className="flex flex-col leading-tight">
                 <span className="text-lg font-bold text-cyan-700">昊甲能源</span>
                 <span className="text-xs text-gray-500 -mt-0.5">Haojia Energy</span>
               </Link>
@@ -189,9 +190,9 @@ export default function Navbar() {
 
             <nav className="flex flex-col gap-4 mt-6">
               <Link
-                href="/"
+                href="/home"                                 // ✅ from "/" → "/home"
                 className={`text-lg font-medium transition-colors ${
-                  isActive("/") ? "text-cyan-700" : "hover:text-cyan-700"
+                  isActive("/home") ? "text-cyan-700" : "hover:text-cyan-700"
                 }`}
                 onClick={() => setIsMenuOpen(false)}
               >
@@ -235,7 +236,7 @@ export default function Navbar() {
               </Link>
 
               <Link
-                href="/#about"
+                href="/home#about"                           // ✅ from "/#about" → "/home#about"
                 className="text-lg font-medium hover:text-cyan-700 transition-colors"
                 onClick={() => setIsMenuOpen(false)}
               >
